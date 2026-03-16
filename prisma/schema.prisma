@@ -1,0 +1,108 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  previewFeatures = ["driverAdapters"] 
+}
+
+datasource db {
+  provider = "postgresql" 
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- Enums ---------------- //
+// تحديد أنواع الصلاحيات، أنواع الرسائل، وحالتها
+enum Role {
+  ADMIN
+  DOCTOR
+}
+
+enum ThesisType {
+  MASTER
+  PHD
+}
+
+enum ThesisStatus {
+  PENDING      // قيد التجهيز
+  IN_PROGRESS  // قيد المناقشة
+  APPROVED     // مجازة
+}
+
+// ---------------- Models ---------------- //
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  role          Role     @default(DOCTOR)
+  academicTitle String   @default("دكتور") 
+  doctorCode    String?  @unique 
+  password      String   // النسخة المشفرة للأمان
+  tempPassword  String?  // النسخة النصية عشان تظهر في جدول الإدارة فقط
+  createdAt     DateTime @default(now())
+  image         String?
+}
+model FacultyDoctor {
+  id            String   @id @default(cuid())
+  name          String
+  academicTitle String   @default("دكتور") 
+  supervisions  Supervision[]
+  promotions    Promotion[]
+  createdAt     DateTime @default(now())
+}
+model ExternalExaminer {
+  id             String   @id @default(cuid())
+  name           String
+  universityName String
+  academicTitle  String
+  specialty      String
+  supervisions   Supervision[]
+}
+
+
+
+model Thesis {
+  id               String       @id @default(cuid())
+  title            String
+  studentName      String
+  type             ThesisType
+  status           ThesisStatus @default(PENDING)
+  registrationDate DateTime     @default(now())
+  defenseDate      DateTime?
+  
+  // شيلنا الـ onDelete من هنا
+  supervisors      Supervision[] 
+  createdAt        DateTime     @default(now())
+}
+
+model Promotion {
+  id            String   @id @default(cuid())
+  doctorId      String
+  doctor        FacultyDoctor @relation(fields: [doctorId], references: [id])
+  oldTitle      String
+  newTitle      String
+  promotionDate DateTime @default(now())
+}
+model Notification {
+  id        String   @id @default(cuid())
+  title     String   // العنوان القصير (مثل: تم قبول الطلب)
+  message   String   // النص الكامل
+  type      String   @default("info") // info, warning, success
+  read      Boolean  @default(false)  // هل تمت القراءة؟
+  createdAt DateTime @default(now())
+}
+
+model Supervision {
+  id                 String         @id @default(cuid())
+  thesisId           String
+  
+  // ضيف الـ onDelete: Cascade هنا في العلاقة مع الرسالة
+  thesis             Thesis         @relation(fields: [thesisId], references: [id], onDelete: Cascade)
+  
+  doctorId           String?
+  doctor             FacultyDoctor? @relation(fields: [doctorId], references: [id])
+
+  externalExaminerId String?
+  externalExaminer   ExternalExaminer? @relation(fields: [externalExaminerId], references: [id])
+
+  supervisionRole    String  
+}

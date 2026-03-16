@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+build/
+
+# Environment variables (مهم جداً)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Prisma
+*.db
+*.db-journal
+
+# Vercel / OS files
+.vercel
+.DS_Store
+*.pem
