@@ -2,7 +2,6 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 
-// 1. إضافة رسالة جديدة
 export async function addThesisAction(formData: FormData) {
   const title = formData.get("title") as string;
   const studentName = formData.get("studentName") as string;
@@ -39,7 +38,6 @@ export async function addThesisAction(formData: FormData) {
   }
 }
 
-// 2. تحديث بيانات الرسالة
 export async function updateThesisAction(id: string, formData: FormData) {
   try {
     const title = formData.get("title") as string;

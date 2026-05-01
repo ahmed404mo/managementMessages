@@ -14,11 +14,12 @@ import {
   AlertCircle,
   Search,
   Edit3,
-  Trash2
+  Trash2,
+  Trash2 as TrashIcon
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ThesisForm from "./thesis-form";
-import { bulkAddThesesAction, getThesesAction, deleteThesisAction, updateThesisAction } from "./actions";
+import { bulkAddThesesAction, getThesesAction, deleteThesisAction, updateThesisAction, deleteAllThesesAction } from "./actions";
 
 export default function ThesesPage() {
   const [activeTab, setActiveTab] = useState<"excel" | "add" | "list">("excel");
@@ -27,16 +28,20 @@ export default function ThesesPage() {
   const [externals, setExternals] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   
+  // حالات رفع Excel
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
   const [uploadResults, setUploadResults] = useState<any>(null);
   
+  // حالات التعديل والحذف
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: "", studentName: "", type: "" });
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   
+  // Popup
   const [popup, setPopup] = useState<{ show: boolean; message: string; type: "success" | "error" }>({
     show: false, message: "", type: "success",
   });
@@ -46,6 +51,7 @@ export default function ThesesPage() {
     setTimeout(() => setPopup(p => ({ ...p, show: false })), 3000);
   };
 
+  // تحميل البيانات الأولية
   useEffect(() => {
     loadInitialData();
   }, []);
@@ -70,6 +76,20 @@ export default function ThesesPage() {
   const loadTheses = async () => {
     const data = await getThesesAction();
     setTheses(data);
+  };
+
+  // دالة مسح كل الرسائل
+  const handleDeleteAll = async () => {
+    setLoading(true);
+    const res = await deleteAllThesesAction();
+    setLoading(false);
+    if (res.success) {
+      showPopup(res.message || `✅ تم حذف ${res.count} رسالة بنجاح`, "success");
+      setShowDeleteAllConfirm(false);
+      loadTheses();
+    } else {
+      showPopup(res.error || "فشل حذف الرسائل", "error");
+    }
   };
 
   const handleEditClick = (thesis: any) => {
@@ -107,6 +127,60 @@ export default function ThesesPage() {
     setLoading(false);
   };
 
+  // ✅ دالة مساعدة لتحويل تاريخ Excel بشكل صحيح
+  function parseExcelDate(dateValue: any): string {
+    if (!dateValue || dateValue === '-' || dateValue === '') return '';
+    
+    // لو كان التاريخ رقم (Excel serial number)
+    if (typeof dateValue === 'number') {
+      const excelEpoch = new Date(1899, 11, 30);
+      const jsDate = new Date(excelEpoch.getTime() + dateValue * 86400000);
+      
+      if (!isNaN(jsDate.getTime()) && jsDate.getFullYear() > 1900 && jsDate.getFullYear() < 2030) {
+        const year = jsDate.getFullYear();
+        const month = String(jsDate.getMonth() + 1).padStart(2, '0');
+        const day = String(jsDate.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    }
+    
+    // لو كان نص
+    const dateStr = String(dateValue).trim();
+    
+    // صيغة YYYY-MM-DD
+    let match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+    
+    // صيغة DD/MM/YYYY
+    match = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (match) {
+      return `${match[3]}-${match[2]}-${match[1]}`;
+    }
+    
+    // صيغة DD-MM-YYYY
+    match = dateStr.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (match) {
+      return `${match[3]}-${match[2]}-${match[1]}`;
+    }
+    
+    // صيغة YYYY/MM/DD
+    match = dateStr.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+    if (match) {
+      return `${match[1]}-${match[2]}-${match[3]}`;
+    }
+    
+    // محاولة new Date()
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1900 && parsed.getFullYear() < 2030) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
+    
+    return '';
+  }
+
+  // ✅ دالة رفع Excel
   const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -144,16 +218,17 @@ export default function ThesesPage() {
         const worksheet = workbook.Sheets[sheetName];
         const excelData = XLSX.utils.sheet_to_json(worksheet);
 
+        // تحويل البيانات
         const formattedData = excelData.map((row: any) => ({
           م: row["م"] || row["id"] || "",
           القسم: row["القسم"] || row["department"] || "",
-          اسم_الباحث: String(row["اسم الباحث"] || row["studentName"] || "").trim(),
-          عنوان_الرسالة: String(row["عنوان الرسالة"] || row["title"] || "").trim(),
+          اسم_الباحث: String(row["اسم الباحث"] || row["studentName"] || row["اسم_الباحث"] || "").trim(),
+          عنوان_الرسالة: String(row["عنوان الرسالة"] || row["title"] || row["عنوان_الرسالة"] || "").trim(),
           المشرف1: row["المشرف1"] || row["supervisor1"] || "",
           المشرف2: row["المشرف2"] || row["supervisor2"] || "",
           المشرف3: row["المشرف3"] || row["supervisor3"] || "",
-          تاريخ_التسجيل: row["تاريخ التسجيل"] || row["registrationDate"] || "",
-          تاريخ_المنح: row["تاريخ المنح"] || row["grantDate"] || "",
+          تاريخ_التسجيل: parseExcelDate(row["تاريخ التسجيل"] || row["registrationDate"]),
+          تاريخ_المنح: parseExcelDate(row["تاريخ المنح"] || row["grantDate"]),
           حالة_القيد: row["حالة القيد"] || row["status"] || "PENDING",
           النوع: row["النوع"] || row["type"] || "MASTER",
           ملاحظات: row["ملاحظات"] || row["notes"] || "",
@@ -215,6 +290,7 @@ export default function ThesesPage() {
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 relative" dir="rtl">
       
+      {/* Popup Notifications */}
       <AnimatePresence>
         {popup.show && (
           <motion.div initial={{ opacity: 0, y: -50, x: "-50%" }} animate={{ opacity: 1, y: 20, x: "-50%" }} exit={{ opacity: 0, y: -50, x: "-50%" }} className="fixed top-5 left-1/2 z-[9999] min-w-[320px]">
@@ -227,6 +303,36 @@ export default function ThesesPage() {
         )}
       </AnimatePresence>
 
+      {/* نافذة تأكيد مسح الكل */}
+      <AnimatePresence>
+        {showDeleteAllConfirm && (
+          <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center top-0 left-0 m-0 p-0 overflow-hidden">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowDeleteAllConfirm(false)} className="absolute inset-0 w-full h-full bg-slate-950/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative z-10 bg-white p-8 rounded-[2.5rem] shadow-2xl max-w-md w-[90%] md:w-full text-center">
+              <div className="w-20 h-20 bg-red-50 text-red-500 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                <TrashIcon size={40} />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">⚠️ تحذير: مسح كل الرسائل</h3>
+              <p className="text-slate-500 font-bold text-sm mb-4">
+                هل أنت متأكد من حذف <span className="text-red-600 font-black">{theses.length}</span> رسالة وجميع المشرفين المرتبطين بها؟
+              </p>
+              <p className="text-amber-600 font-bold text-xs mb-8 bg-amber-50 p-3 rounded-xl">
+                ⚠️ هذا الإجراء لا يمكن التراجع عنه!
+              </p>
+              <div className="flex gap-3">
+                <button onClick={handleDeleteAll} disabled={loading} className="flex-1 bg-red-600 text-white py-4 rounded-2xl font-black hover:bg-red-700 transition-all">
+                  {loading ? "جاري الحذف..." : "نعم، احذف الكل"}
+                </button>
+                <button onClick={() => setShowDeleteAllConfirm(false)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black hover:bg-slate-200 transition-all">
+                  إلغاء
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* نافذة تأكيد حذف رسالة واحدة */}
       <AnimatePresence>
         {deleteConfirm && (
           <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center top-0 left-0 m-0 p-0 overflow-hidden">
@@ -244,6 +350,7 @@ export default function ThesesPage() {
         )}
       </AnimatePresence>
 
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-200 pb-8">
         <div className="flex items-center gap-5">
           <div className="p-4 bg-slate-950 rounded-[1.5rem] text-white shadow-2xl shadow-slate-300">
@@ -254,8 +361,18 @@ export default function ThesesPage() {
             <p className="text-slate-500 font-bold mt-1">إضافة البيانات الأساسية وتعيين هيئة الإشراف والمناقشة</p>
           </div>
         </div>
+        
+        {/* زر مسح الكل */}
+        <button
+          onClick={() => setShowDeleteAllConfirm(true)}
+          className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-2xl font-black text-sm flex items-center gap-2 shadow-lg transition-all"
+        >
+          <TrashIcon size={18} />
+          مسح كل الرسائل
+        </button>
       </div>
 
+      {/* Tabs */}
       <div className="flex bg-slate-950 p-1.5 rounded-2xl shadow-2xl relative w-full max-w-md border border-white/5">
         <button onClick={() => setActiveTab("excel")} className={`relative z-10 flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-black text-sm transition-all duration-300 ${activeTab === "excel" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}>
           <FileSpreadsheet size={18} /> رفع Excel
@@ -270,7 +387,9 @@ export default function ThesesPage() {
         <motion.div 
           layoutId="activeTabPill" 
           className="absolute bg-blue-600 rounded-xl h-[calc(100%-12px)] top-[6px] shadow-lg shadow-blue-600/40" 
-          animate={{ x: activeTab === "excel" ? 0 : activeTab === "add" ? "-100%" : "-200%" }} 
+          animate={{ 
+            x: activeTab === "excel" ? 0 : activeTab === "add" ? "-100%" : "-200%" 
+          }} 
           transition={{ type: "spring", stiffness: 350, damping: 30 }} 
           style={{ right: "6px", width: "calc(33.333% - 8px)" }} 
         />
@@ -278,6 +397,7 @@ export default function ThesesPage() {
 
       <AnimatePresence mode="wait">
         
+        {/* تبويب رفع Excel */}
         {activeTab === "excel" && (
           <motion.div key="excel-tab" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-white border border-slate-200 p-10 rounded-[2.5rem] shadow-2xl max-w-4xl mx-auto relative overflow-hidden z-10">
             <div className="absolute top-0 right-0 w-2 h-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]" />
@@ -359,17 +479,25 @@ export default function ThesesPage() {
           </motion.div>
         )}
 
+        {/* تبويب الإضافة الفردية */}
         {activeTab === "add" && (
           <motion.div key="add-tab" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
             <ThesisForm doctors={doctors} externals={externals} />
           </motion.div>
         )}
 
+        {/* تبويب سجل البيانات */}
         {activeTab === "list" && (
           <motion.div key="list-tab" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-            <div className="bg-white/80 backdrop-blur-md p-3 px-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 max-w-md mr-auto">
-              <Search className="text-slate-400" size={20} />
-              <input type="text" placeholder="ابحث بالعنوان أو اسم الطالب..." className="bg-transparent w-full outline-none font-bold text-slate-800 text-sm" onChange={(e) => setSearchTerm(e.target.value)} />
+            <div className="flex justify-between items-center gap-4">
+              <div className="bg-white/80 backdrop-blur-md p-3 px-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 flex-1">
+                <Search className="text-slate-400" size={20} />
+                <input type="text" placeholder="ابحث بالعنوان أو اسم الطالب..." className="bg-transparent w-full outline-none font-bold text-slate-800 text-sm" onChange={(e) => setSearchTerm(e.target.value)} />
+              </div>
+              
+              <div className="bg-slate-100 px-4 py-3 rounded-2xl">
+                <span className="font-black text-slate-700">إجمالي: {theses.length} رسالة</span>
+              </div>
             </div>
 
             <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden">
@@ -381,6 +509,7 @@ export default function ThesesPage() {
                       <th className="p-6 font-black text-[11px] text-center">اسم الطالب</th>
                       <th className="p-6 font-black text-[11px] text-center">النوع</th>
                       <th className="p-6 font-black text-[11px] text-center">تاريخ التسجيل</th>
+                      <th className="p-6 font-black text-[11px] text-center">المشرفين</th>
                       <th className="p-6 font-black text-[11px] text-center">الإجراءات</th>
                     </tr>
                   </thead>
@@ -416,6 +545,9 @@ export default function ThesesPage() {
                         <td className="p-6 text-center">
                           {new Date(thesis.registrationDate).toLocaleDateString('ar-EG')}
                         </td>
+                        <td className="p-6 text-center">
+                          <span className="text-blue-600 font-bold">{thesis.supervisors?.length || 0}</span>
+                        </td>
                         <td className="p-6">
                           <div className="flex items-center justify-center gap-2">
                             {editingId === thesis.id ? (
@@ -434,7 +566,7 @@ export default function ThesesPage() {
                       </tr>
                     ))}
                     {filteredTheses.length === 0 && (
-                      <tr><td colSpan={5} className="p-24 text-center font-black text-slate-300 italic">لا يوجد رسائل مسجلة</td></tr>
+                      <tr><td colSpan={6} className="p-24 text-center font-black text-slate-300 italic">لا يوجد رسائل مسجلة</td></tr>
                     )}
                   </tbody>
                 </table>

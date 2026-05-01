@@ -48,13 +48,14 @@ export async function addThesisAction(formData: FormData) {
   }
 }
 
-// ✅ دالة الإضافة الجماعية للرسائل
+// ✅ دالة الإضافة الجماعية للرسائل (مع إنشاء المشرفين تلقائياً)
 export async function bulkAddThesesAction(thesesData: any[]) {
   try {
     const results = [];
     let successCount = 0;
     let errorCount = 0;
     let warningCount = 0;
+    let newDoctorsCount = 0;
     
     for (let i = 0; i < thesesData.length; i++) {
       const thesis = thesesData[i];
@@ -81,7 +82,7 @@ export async function bulkAddThesesAction(thesesData: any[]) {
         continue;
       }
 
-      // تحديد نوع الرسالة (معالجة الأخطاء الإملائية)
+      // تحديد نوع الرسالة
       let thesisType = "MASTER";
       const typeValue = (thesis.النوع || "").toString();
       if (typeValue.includes("دكتوراه") || typeValue === "PHD" || typeValue === "PhD") {
@@ -99,7 +100,6 @@ export async function bulkAddThesesAction(thesesData: any[]) {
         thesisStatus = "APPROVED";
       }
 
-      // معالجة تاريخ التسجيل
       let registrationDate = new Date();
       if (thesis.تاريخ_التسجيل && thesis.تاريخ_التسجيل !== '-') {
         registrationDate = new Date(thesis.تاريخ_التسجيل);
@@ -108,7 +108,6 @@ export async function bulkAddThesesAction(thesesData: any[]) {
         }
       }
 
-      // معالجة تاريخ المنح
       let defenseDate = null;
       if (thesis.تاريخ_المنح && thesis.تاريخ_المنح !== '-') {
         defenseDate = new Date(thesis.تاريخ_المنح);
@@ -151,11 +150,12 @@ export async function bulkAddThesesAction(thesesData: any[]) {
         if (thesis.المشرف2 && thesis.المشرف2 !== '-') supervisorNames.push(thesis.المشرف2);
         if (thesis.المشرف3 && thesis.المشرف3 !== '-') supervisorNames.push(thesis.المشرف3);
         
-        // البحث عن المشرفين وإضافتهم
+        // ✅ البحث عن المشرفين وإنشائهم إذا لم يكونوا موجودين
         const supervisorsData = [];
         for (const supName of supervisorNames) {
           if (supName && supName.trim()) {
-            const doctor = await prisma.facultyDoctor.findFirst({
+            // 1. ابحث عن دكتور داخلي
+            let doctor = await prisma.facultyDoctor.findFirst({
               where: { name: { contains: supName.trim(), mode: 'insensitive' } }
             });
             
@@ -164,8 +164,10 @@ export async function bulkAddThesesAction(thesesData: any[]) {
                 doctorId: doctor.id,
                 supervisionRole: "مشرف رئيسي"
               });
+              console.log(`✅ تم العثور على المشرف: ${doctor.name}`);
             } else {
-              const external = await prisma.externalExaminer.findFirst({
+              // 2. ابحث عن مناقش خارجي
+              let external = await prisma.externalExaminer.findFirst({
                 where: { name: { contains: supName.trim(), mode: 'insensitive' } }
               });
               
@@ -174,19 +176,40 @@ export async function bulkAddThesesAction(thesesData: any[]) {
                   externalExaminerId: external.id,
                   supervisionRole: "مناقش خارجي"
                 });
+                console.log(`✅ تم العثور على المناقش الخارجي: ${external.name}`);
               } else {
-                results.push({ 
-                  warning: `السطر ${rowNumber}: المشرف "${supName}" غير موجود`, 
-                  thesisId: newThesis.id,
-                  status: 'warning'
-                });
-                warningCount++;
+                // 3. لو مش موجود خالص، اخلق دكتور جديد في FacultyDoctor
+                try {
+                  const newDoctor = await prisma.facultyDoctor.create({
+                    data: {
+                      name: supName.trim(),
+                      academicTitle: "دكتور" // لقب افتراضي
+                    }
+                  });
+                  supervisorsData.push({
+                    doctorId: newDoctor.id,
+                    supervisionRole: "مشرف رئيسي"
+                  });
+                  newDoctorsCount++;
+                  console.log(`✨ تم إنشاء دكتور جديد: ${supName}`);
+                  results.push({ 
+                    info: `السطر ${rowNumber}: تم إنشاء مشرف جديد "${supName}"`, 
+                    status: 'info'
+                  });
+                } catch (createError) {
+                  console.error(`فشل إنشاء المشرف "${supName}":`, createError);
+                  results.push({ 
+                    warning: `السطر ${rowNumber}: فشل إنشاء المشرف "${supName}"`, 
+                    status: 'warning'
+                  });
+                  warningCount++;
+                }
               }
             }
           }
         }
         
-        // إضافة المشرفين
+        // إضافة المشرفين إلى جدول Supervision
         for (const sup of supervisorsData) {
           await prisma.supervision.create({
             data: { ...sup, thesisId: newThesis.id }
@@ -223,6 +246,7 @@ export async function bulkAddThesesAction(thesesData: any[]) {
       successCount,
       errorCount,
       warningCount,
+      newDoctorsCount, // ✅ عدد الدكاترة الجدد اللي اتعملوا
       total: thesesData.length
     };
   } catch (error) {
@@ -278,5 +302,25 @@ export async function updateThesisAction(id: string, data: { title: string, stud
     return { success: true };
   } catch (error) {
     return { error: "فشل التحديث" };
+  }
+}
+// دالة مسح كل الرسائل والمشرفين
+export async function deleteAllThesesAction() {
+  try {
+    const deletedSupervisions = await prisma.supervision.deleteMany({});
+    console.log(`✅ تم حذف ${deletedSupervisions.count} من جدول Supervision`);
+    
+    const deletedTheses = await prisma.thesis.deleteMany({});
+    console.log(`✅ تم حذف ${deletedTheses.count} رسالة من جدول Thesis`);
+    
+    revalidatePath("/admin-dashboard/theses");
+    return { 
+      success: true, 
+      count: deletedTheses.count,
+      message: `تم حذف ${deletedTheses.count} رسالة و ${deletedSupervisions.count} علاقة إشراف`
+    };
+  } catch (error) {
+    console.error("Error deleting all theses:", error);
+    return { error: "فشل حذف الرسائل" };
   }
 }

@@ -10,20 +10,22 @@ export default async function DoctorPortalPage() {
     include: {
       supervisors: {
         include: {
-          doctor: true,
-          externalExaminer: true,
-        }
-      }
+          doctor: true,           
+          externalExaminer: true, 
+        },
+      },
     },
     orderBy: {
-      registrationDate: 'desc'
-    }
+      registrationDate: 'desc',
+    },
   });
+console.log("عدد المشرفين في أول رسالة:", theses[0]?.supervisors?.length);
 
-  // هنا قمنا بحذف الـ Hero القديم وتركنا فقط استدعاء المكون التفاعلي
+  const plainTheses = JSON.parse(JSON.stringify(theses));
+
   return (
     <div className="min-h-screen bg-slate-50/30">
-        <ThesesClientView initialTheses={theses} />
+      <ThesesClientView initialTheses={plainTheses} />
     </div>
   );
 }
