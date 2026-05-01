@@ -13,7 +13,7 @@ export async function getDoctorAccounts() {
     return accounts;
   } catch (error) {
     console.error("Error fetching accounts:", error);
-    return [];
+    return[];
   }
 }
 
@@ -50,6 +50,7 @@ export async function addDoctorAction(formData: FormData) {
     return { error: "حدث خطأ أثناء الإنشاء، ربما الكود مكرر، حاول مرة أخرى" };
   }
 }
+
 export async function updateDoctorAction(id: string, data: { name: string, academicTitle: string }) {
   try {
     if (!data.name || data.name.length < 3) {
@@ -73,7 +74,6 @@ export async function updateDoctorAction(id: string, data: { name: string, acade
   }
 }
 
-
 export async function getThesesAction() {
   return await prisma.thesis.findMany({
     orderBy: { createdAt: "desc" },
@@ -95,6 +95,7 @@ export async function addThesisAction(formData: FormData) {
     return { error: "حدث خطأ أثناء إضافة الرسالة" };
   }
 }
+
 export async function deleteDoctorAction(id: string) {
   try {
     await prisma.user.delete({
@@ -105,5 +106,50 @@ export async function deleteDoctorAction(id: string) {
   } catch (error: any) {
     console.error("Error deleting doctor:", error);
     return { error: error.message || "حدث خطأ غير معروف أثناء الحذف" };
+  }
+}
+
+export async function bulkAddDoctorsAction(doctors: Array<{ name: string; academicTitle: string }>) {
+  try {
+    const results = [];
+    
+    for (const doctor of doctors) {
+      if (!doctor.name || doctor.name.length < 3) {
+        results.push({ error: `الاسم "${doctor.name}" قصير جداً`, doctor });
+        continue;
+      }
+
+      const doctorCode = `USR-${Math.floor(1000 + Math.random() * 9000)}`;
+      const plainPassword = "Pass@" + Math.floor(100 + Math.random() * 900);
+      const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+      try {
+        const newUser = await prisma.user.create({
+          data: {
+            name: doctor.name,
+            academicTitle: doctor.academicTitle,
+            doctorCode,
+            password: hashedPassword,
+            tempPassword: plainPassword,
+            role: "DOCTOR",
+          },
+        });
+        
+        results.push({ 
+          success: true, 
+          doctorCode: newUser.doctorCode, 
+          password: plainPassword,
+          doctor 
+        });
+      } catch (error) {
+        results.push({ error: "حدث خطأ أثناء الإنشاء", doctor });
+      }
+    }
+
+    revalidatePath("/admin-dashboard/doctors");
+    return { success: true, results };
+  } catch (error) {
+    console.error("Error bulk adding doctors:", error);
+    return { error: "حدث خطأ أثناء الإضافة الجماعية" };
   }
 }

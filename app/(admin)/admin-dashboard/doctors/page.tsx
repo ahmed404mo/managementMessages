@@ -1,18 +1,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { addDoctorAction, getDoctorAccounts, updateDoctorAction, deleteDoctorAction } from "./actions";
+import { 
+  addDoctorAction, 
+  getDoctorAccounts, 
+  updateDoctorAction, 
+  deleteDoctorAction,
+  bulkAddDoctorsAction // 👈 لا تنسَ استيراد هذه الدالة من ملف الأكشنز
+} from "./actions";
 import { 
   UserPlus, ListOrdered, GraduationCap, Copy, 
-  CheckCircle2, Search, User, Edit3, X, Check, AlertCircle, Trash2 
+  CheckCircle2, Search, User, Edit3, X, Check, AlertCircle, Trash2, 
+  FileSpreadsheet, UploadCloud // 👈 أيقونات جديدة
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function DoctorManagement() {
-  const [activeTab, setActiveTab] = useState<"add" | "list">("add");
+  // إضافة تبويبة "excel"
+  const [activeTab, setActiveTab] = useState<"add" | "excel" | "list">("add");
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
+  const[searchTerm, setSearchTerm] = useState("");
   
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ name: "", academicTitle: "" });
@@ -69,14 +77,67 @@ export default function DoctorManagement() {
     setLoading(false);
   };
 
+  // 🌟 وظيفة قراءة ورفع ملف Excel 🌟
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    const reader = new FileReader();
+
+    reader.onload = async (event) => {
+      try {
+        const data = event.target?.result;
+        // استيراد المكتبة ديناميكياً حتى لا تبطئ تحميل الصفحة الأولى
+        const XLSX = await import("xlsx");
+        
+        const workbook = XLSX.read(data, { type: "binary" });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const excelData = XLSX.utils.sheet_to_json(worksheet);
+
+        // تنسيق البيانات لتطابق المطلوب
+        const formattedData = excelData.map((row: any) => ({
+          doctorCode: String(row["User Id"] || "").trim(),
+          name: String(row["Dr Name"] || "").trim(),
+          password: String(row["Password"] || "").trim(),
+          academicTitle: "دكتور" // درجة افتراضية
+        })).filter(row => row.doctorCode && row.name); // تجاهل الصفوف الفارغة
+
+        if (formattedData.length === 0) {
+          showPopup("الملف فارغ أو لا يطابق الصيغة المطلوبة (تأكد من العناوين: User Id, Dr Name, Password)", "error");
+          setLoading(false);
+          return;
+        }
+
+        const res = await bulkAddDoctorsAction(formattedData);
+        
+        if (res.success) {
+          showPopup(`تم استيراد ${res.count} حساب بنجاح!`, "success");
+          e.target.value = ''; // تصفير الملف
+          setActiveTab("list"); // التحويل لصفحة السجل
+        } else {
+          showPopup(res.error || "فشل الاستيراد", "error");
+        }
+      } catch (error) {
+        console.error(error);
+        showPopup("حدث خطأ أثناء قراءة الملف. تأكد من أنه ملف إكسل سليم.", "error");
+      }
+      setLoading(false);
+    };
+
+    reader.readAsBinaryString(file);
+  };
+
   const filteredAccounts = accounts.filter(acc => 
     acc.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    acc.doctorCode.includes(searchTerm)
+    (acc.doctorCode && acc.doctorCode.includes(searchTerm))
   );
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 px-4 relative" dir="rtl">
       
+      {/* Popups and Modals (Same as your code) */}
       <AnimatePresence>
         {popup.show && (
           <motion.div initial={{ opacity: 0, y: -50, x: "-50%" }} animate={{ opacity: 1, y: 20, x: "-50%" }} exit={{ opacity: 0, y: -50, x: "-50%" }} className="fixed top-5 left-1/2 z-[9999] min-w-[320px]">
@@ -92,21 +153,9 @@ export default function DoctorManagement() {
       <AnimatePresence>
         {deleteConfirm && (
           <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center top-0 left-0 m-0 p-0 overflow-hidden">
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }} 
-              onClick={() => setDeleteConfirm(null)} 
-              className="absolute inset-0 w-full h-full bg-slate-950/60 backdrop-blur-sm" 
-            />
-            
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }} 
-              animate={{ scale: 1, opacity: 1 }} 
-              exit={{ scale: 0.9, opacity: 0 }} 
-              className="relative z-10 bg-white p-8 rounded-[2.5rem] shadow-2xl max-w-sm w-[90%] md:w-full text-center border border-slate-100 mx-auto"
-            >
-              <div className="w-20 h-sc bg-rose-50 text-rose-500 rounded-3xl flex items-center justify-center mx-auto mb-6"><AlertCircle size={40} /></div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setDeleteConfirm(null)} className="absolute inset-0 w-full h-full bg-slate-950/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative z-10 bg-white p-8 rounded-[2.5rem] shadow-2xl max-w-sm w-[90%] md:w-full text-center border border-slate-100 mx-auto">
+              <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-3xl flex items-center justify-center mx-auto mb-6"><AlertCircle size={40} /></div>
               <h3 className="text-xl font-black text-slate-900 mb-2">تأكيد الحذف</h3>
               <p className="text-slate-500 font-bold text-sm mb-8">هل أنت متأكد من حذف هذا الحساب نهائياً؟</p>
               <div className="flex gap-3">
@@ -118,6 +167,7 @@ export default function DoctorManagement() {
         )}
       </AnimatePresence>
 
+      {/* Header and Tabs Navigation */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white/80 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white shadow-2xl shadow-slate-200/50 relative z-10">
         <div className="flex items-center gap-5">
           <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-blue-500/40 rotate-3 transition-transform duration-300">
@@ -129,15 +179,28 @@ export default function DoctorManagement() {
           </div>
         </div>
 
-        <div className="flex bg-slate-950 p-1.5 rounded-2xl shadow-2xl relative min-w-[320px] border border-white/5">
-          <button onClick={() => setActiveTab("add")} className={`relative z-10 flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-black text-sm transition-all duration-300 ${activeTab === "add" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}><UserPlus size={18} /> إضافة حساب</button>
+        {/* 🌟 تم تعديل التبويبات لتشمل الرفع بالإكسل 🌟 */}
+        <div className="flex bg-slate-950 p-1.5 rounded-2xl shadow-2xl relative min-w-[420px] border border-white/5">
+          <button onClick={() => setActiveTab("add")} className={`relative z-10 flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-black text-sm transition-all duration-300 ${activeTab === "add" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}><UserPlus size={18} /> إضافة فردية</button>
+          <button onClick={() => setActiveTab("excel")} className={`relative z-10 flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-black text-sm transition-all duration-300 ${activeTab === "excel" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}><FileSpreadsheet size={18} /> رفع Excel</button>
           <button onClick={() => setActiveTab("list")} className={`relative z-10 flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-black text-sm transition-all duration-300 ${activeTab === "list" ? "text-white" : "text-slate-500 hover:text-slate-300"}`}><ListOrdered size={18} /> سجل البيانات</button>
-          <motion.div layoutId="activeTabPill" className="absolute bg-blue-600 rounded-xl h-[calc(100%-12px)] top-[6px] w-[calc(50%-9px)] shadow-lg shadow-blue-600/40" animate={{ x: activeTab === "add" ? 0 : "-100%" }} transition={{ type: "spring", stiffness: 350, damping: 30 }} style={{ right: "6px" }} />
+          
+          <motion.div 
+            layoutId="activeTabPill" 
+            className="absolute bg-blue-600 rounded-xl h-[calc(100%-12px)] top-[6px] shadow-lg shadow-blue-600/40" 
+            animate={{ 
+              x: activeTab === "add" ? 0 : activeTab === "excel" ? "-100%" : "-200%" 
+            }} 
+            transition={{ type: "spring", stiffness: 350, damping: 30 }} 
+            style={{ right: "6px", width: "calc(33.333% - 8px)" }} 
+          />
         </div>
       </div>
 
       <AnimatePresence mode="wait">
-        {activeTab === "add" ? (
+        
+        {/* Tab 1: Single Add */}
+        {activeTab === "add" && (
           <motion.div key="add-tab" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-white border border-slate-200 p-10 rounded-[2.5rem] shadow-2xl max-w-2xl mx-auto relative overflow-hidden z-10">
             <div className="absolute top-0 right-0 w-2 h-full bg-blue-600 shadow-[0_0_15px_rgba(37,99,235,0.5)]" />
             <h2 className="text-xl font-black text-slate-900 mb-8 flex items-center gap-3"><CheckCircle2 size={22} className="text-blue-600"/> إنشاء حساب جديد</h2>
@@ -153,7 +216,47 @@ export default function DoctorManagement() {
               <button disabled={loading} className="w-full bg-slate-950 text-white p-5 rounded-2xl font-black text-lg hover:bg-blue-600 transition-all shadow-xl active:scale-[0.98]">{loading ? "جاري المعالجة..." : "تفعيل الحساب الآن"}</button>
             </form>
           </motion.div>
-        ) : (
+        )}
+
+        {/* 🌟 Tab 2: Excel Upload 🌟 */}
+        {activeTab === "excel" && (
+          <motion.div key="excel-tab" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-white border border-slate-200 p-10 rounded-[2.5rem] shadow-2xl max-w-3xl mx-auto relative overflow-hidden z-10 text-center">
+             <div className="absolute top-0 right-0 w-2 h-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]" />
+             <div className="mb-8">
+               <h2 className="text-2xl font-black text-slate-900 mb-3 flex items-center justify-center gap-3">
+                 <FileSpreadsheet size={28} className="text-emerald-500"/> الإضافة الجماعية عبر Excel
+               </h2>
+               <p className="text-slate-500 font-bold text-sm">لضمان القراءة الصحيحة، يجب أن يحتوي الصف الأول في الملف على هذه العناوين تماماً:</p>
+               <div className="flex gap-2 justify-center mt-4">
+                 <span className="bg-slate-100 px-3 py-1 rounded-md text-slate-700 font-mono text-xs font-bold border border-slate-200">User Id</span>
+                 <span className="bg-slate-100 px-3 py-1 rounded-md text-slate-700 font-mono text-xs font-bold border border-slate-200">Dr Name</span>
+                 <span className="bg-slate-100 px-3 py-1 rounded-md text-slate-700 font-mono text-xs font-bold border border-slate-200">Password</span>
+               </div>
+             </div>
+
+             <div className={`relative border-2 border-dashed ${loading ? "border-emerald-500 bg-emerald-50" : "border-slate-300 hover:bg-slate-50"} rounded-3xl p-12 transition-all group`}>
+               <input 
+                 type="file" 
+                 accept=".xlsx, .xls" 
+                 onChange={handleExcelUpload} 
+                 disabled={loading} 
+                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
+               />
+               <div className="flex flex-col items-center gap-4 relative z-0">
+                 <div className={`w-24 h-24 rounded-full flex items-center justify-center transition-transform ${loading ? "bg-emerald-500 text-white animate-pulse" : "bg-emerald-100 text-emerald-600 group-hover:scale-110"}`}>
+                   <UploadCloud size={48} />
+                 </div>
+                 <h3 className="font-black text-xl text-slate-800">
+                   {loading ? "جاري معالجة الملف واستخراج البيانات..." : "اضغط هنا لاختيار الملف أو اسحبه وأفلته"}
+                 </h3>
+                 {!loading && <p className="text-slate-400 font-bold text-sm">صيغ الملفات المدعومة: .xlsx, .xls</p>}
+               </div>
+             </div>
+          </motion.div>
+        )}
+
+        {/* Tab 3: List Data */}
+        {activeTab === "list" && (
           <motion.div key="list-tab" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6 relative z-10">
             <div className="bg-white/80 backdrop-blur-md p-3 px-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4 max-w-md mr-auto focus-within:border-blue-400 transition-all">
               <Search className="text-slate-400" size={20} />
@@ -187,7 +290,7 @@ export default function DoctorManagement() {
                         )}
                       </td>
                       <td className="p-6 text-center"><code className="bg-slate-100 text-slate-900 px-4 py-2 rounded-xl font-mono font-black text-sm border border-slate-200">{acc.doctorCode}</code></td>
-                      <td className="p-6 text-center"><code className="bg-blue-600 text-white px-4 py-2 rounded-xl font-mono font-black text-sm shadow-lg shadow-blue-600/30">{acc.tempPassword}</code></td>
+                      <td className="p-6 text-center"><code className="bg-blue-600 text-white px-4 py-2 rounded-xl font-mono font-black text-sm shadow-lg shadow-blue-600/30">{acc.tempPassword || acc.password}</code></td>
                       <td className="p-6">
                         <div className="flex items-center justify-center gap-2">
                           {editingId === acc.id ? (
@@ -198,7 +301,7 @@ export default function DoctorManagement() {
                           ) : (
                             <div className="flex items-center gap-2">
                               <button onClick={() => handleEditClick(acc)} className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><Edit3 size={18}/></button>
-                              <button onClick={() => { navigator.clipboard.writeText(`كود: ${acc.doctorCode}\nباسوورد: ${acc.tempPassword}`); showPopup("تم نسخ البيانات", "success"); }} className="bg-slate-950 text-white px-5 py-3 rounded-xl font-black text-[11px] hover:bg-blue-600 transition-all flex items-center gap-2 shadow-md"><Copy size={14} /> نسخ</button>
+                              <button onClick={() => { navigator.clipboard.writeText(`كود: ${acc.doctorCode}\nباسوورد: ${acc.tempPassword || acc.password}`); showPopup("تم نسخ البيانات", "success"); }} className="bg-slate-950 text-white px-5 py-3 rounded-xl font-black text-[11px] hover:bg-blue-600 transition-all flex items-center gap-2 shadow-md"><Copy size={14} /> نسخ</button>
                               <button onClick={() => setDeleteConfirm(acc.id)} className="p-3 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all" title="حذف"><Trash2 size={18}/></button>
                             </div>
                           )}
@@ -211,6 +314,7 @@ export default function DoctorManagement() {
             </div>
           </motion.div>
         )}
+
       </AnimatePresence>
     </div>
   );
